@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Encrypted Chat Client</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1a1a1a;
+            color: #ffffff;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: #0a0a0a;
+            padding: 15px 20px;
+            border-bottom: 2px solid #00ff00;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ff0000;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.connected {
+            background: #00ff00;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .server-input {
+            display: flex;
+            gap: 10px;
+            flex: 1;
+        }
+
+        .server-input input {
+            background: #2a2a2a;
+            border: 1px solid #00ff00;
+            color: #ffffff;
+            padding: 8px 12px;
+            font-family: inherit;
+            font-size: 14px;
+            flex: 1;
+        }
+
+        .server-input button {
+            background: #00ff00;
+            color: #000;
+            border: none;
+            padding: 8px 20px;
+            cursor: pointer;
+            font-weight: bold;
+            font-family: inherit;
+        }
+
+        .server-input button:hover {
+            background: #00cc00;
+        }
+
+        .users-panel {
+            width: 100%;
+            background: #0f0f0f;
+            padding: 10px 20px;
+            border-bottom: 1px solid #333;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .users-label {
+            color: #888;
+            font-size: 12px;
+        }
+
+        .user-chip {
+            background: #2a2a2a;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+        }
+
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-left: 3px solid;
+        }
+
+        .message.you {
+            border-color: #ff00ff;
+        }
+
+        .message.other {
+            border-color: #00aaff;
+        }
+
+        .message.error {
+            border-color: #ff0000;
+            color: #ff0000;
+        }
+
+        .message.system {
+            border-color: #888;
+            color: #aaa;
+        }
+
+        .message-label {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .message-content {
+            word-break: break-word;
+        }
+
+        .input-container {
+            background: #0a0a0a;
+            padding: 20px;
+            border-top: 2px solid #00ff00;
+            display: flex;
+            gap: 10px;
+        }
+
+        .input-container input {
+            flex: 1;
+            background: #2a2a2a;
+            border: 1px solid #00ff00;
+            color: #ffffff;
+            padding: 12px 15px;
+            font-family: inherit;
+            font-size: 16px;
+        }
+
+        .input-container input:focus {
+            outline: none;
+            border-color: #00ff00;
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+        }
+
+        .input-container button {
+            background: #00ff00;
+            color: #000;
+            border: none;
+            padding: 12px 30px;
+            cursor: pointer;
+            font-weight: bold;
+            font-family: inherit;
+            font-size: 16px;
+        }
+
+        .input-container button:hover {
+            background: #00cc00;
+        }
+
+        .input-container button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: #1a1a1a;
+            border: 2px solid #00ff00;
+            padding: 30px;
+            border-radius: 5px;
+            max-width: 400px;
+            width: 90%;
+        }
+
+        .modal-content h2 {
+            color: #00ff00;
+            margin-bottom: 20px;
+        }
+
+        .modal-content input {
+            width: 100%;
+            background: #2a2a2a;
+            border: 1px solid #00ff00;
+            color: #ffffff;
+            padding: 12px 15px;
+            font-family: inherit;
+            font-size: 16px;
+            margin-bottom: 15px;
+        }
+
+        .modal-content button {
+            width: 100%;
+            background: #00ff00;
+            color: #000;
+            border: none;
+            padding: 12px;
+            cursor: pointer;
+            font-weight: bold;
+            font-family: inherit;
+            font-size: 16px;
+        }
+
+        .modal-content button:hover {
+            background: #00cc00;
+        }
+
+        .username-display {
+            color: #00ff00;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+
+        .security-badge {
+            color: #ffaa00;
+            font-size: 11px;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="modal active" id="nameModal">
+        <div class="modal-content">
+            <h2>Enter Your Name</h2>
+            <input type="text" id="nameInput" placeholder="Your name..." maxlength="20" onkeypress="handleNameKeyPress(event)">
+            <button onclick="setUsername()">Join Chat</button>
+        </div>
+    </div>
+
+    <div class="modal" id="keyModal">
+        <div class="modal-content">
+            <h2>🔐 Enter Encryption Key</h2>
+            <input type="password" id="keyInput" placeholder="Shared secret key..." onkeypress="handleKeyKeyPress(event)">
+            <button onclick="setEncryptionKey()">Connect</button>
+        </div>
+    </div>
+
+    <div class="header">
+        <div class="connection-status">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="statusText">Disconnected</span>
+            <span class="username-display" id="usernameDisplay"></span>
+            <span class="security-badge" id="securityBadge">🔒 E2E Encrypted</span>
+        </div>
+        <div class="server-input">
+            <input type="text" id="hostInput" placeholder="Host (e.g., 127.0.0.1)" value="127.0.0.1">
+            <input type="number" id="portInput" placeholder="Port" value="8000">
+            <button onclick="promptForKey()">Connect</button>
+        </div>
+    </div>
+
+    <div class="users-panel">
+        <span class="users-label">ACTIVE USERS:</span>
+        <div id="usersList"></div>
+    </div>
+
+    <div class="chat-container" id="chatContainer"></div>
+
+    <div class="input-container">
+        <input type="text" id="messageInput" placeholder="Type your message..." onkeypress="handleKeyPress(event)" disabled>
+        <button onclick="sendMessage()" id="sendButton" disabled>Send</button>
+    </div>
+
+    <script>
+        let isConnected = false;
+        let baseUrl = '';
+        let username = '';
+        let lastMessageId = 0;
+        let pollingInterval = null;
+        let usersInterval = null;
+        let encryptionKey = null;
+        let salt = null;
+
+        // ===== SECURE ENCRYPTION SYSTEM =====
+        class SecureChat {
+            static async deriveKey(password, salt, iterations = 100000) {
+                const enc = new TextEncoder();
+                const keyMaterial = await window.crypto.subtle.importKey(
+                    'raw',
+                    enc.encode(password),
+                    'PBKDF2',
+                    false,
+                    ['deriveBits', 'deriveKey']
+                );
+
+                const key = await window.crypto.subtle.deriveBits(
+                    {
+                        name: 'PBKDF2',
+                        salt: salt,
+                        iterations: iterations,
+                        hash: 'SHA-256'
+                    },
+                    keyMaterial,
+                    512
+                );
+
+                return new Uint8Array(key);
+            }
+
+            static async sha256(data) {
+                const buffer = await window.crypto.subtle.digest('SHA-256', data);
+                return new Uint8Array(buffer);
+            }
+
+            static async encrypt(plaintext, key) {
+                const enc = new TextEncoder();
+                const data = enc.encode(plaintext);
+
+                const iv = window.crypto.getRandomValues(new Uint8Array(16));
+                const encrypted = new Uint8Array(data.length);
+                let counter = 0;
+
+                for (let i = 0; i < data.length; i++) {
+                    if (i % 32 === 0) {
+                        const counterBytes = new Uint8Array(8);
+                        new DataView(counterBytes.buffer).setBigUint64(0, BigInt(counter), false);
+
+                        const toHash = new Uint8Array(key.length + iv.length + 8);
+                        toHash.set(key);
+                        toHash.set(iv, key.length);
+                        toHash.set(counterBytes, key.length + iv.length);
+
+                        var keystream = await this.sha256(toHash);
+                        counter++;
+                    }
+
+                    encrypted[i] = data[i] ^ keystream[i % 32];
+                }
+
+                const macData = new Uint8Array(key.length + iv.length + encrypted.length);
+                macData.set(key);
+                macData.set(iv, key.length);
+                macData.set(encrypted, key.length + iv.length);
+                const macFull = await this.sha256(macData);
+                const mac = macFull.slice(0, 16);
+
+                const result = new Uint8Array(iv.length + encrypted.length + mac.length);
+                result.set(iv);
+                result.set(encrypted, iv.length);
+                result.set(mac, iv.length + encrypted.length);
+
+                return btoa(String.fromCharCode(...result));
+            }
+
+            static async decrypt(ciphertext, key) {
+                try {
+                    const data = new Uint8Array(
+                        atob(ciphertext).split('').map(c => c.charCodeAt(0))
+                    );
+
+                    const iv = data.slice(0, 16);
+                    const mac = data.slice(-16);
+                    const encrypted = data.slice(16, -16);
+
+                    const macData = new Uint8Array(key.length + iv.length + encrypted.length);
+                    macData.set(key);
+                    macData.set(iv, key.length);
+                    macData.set(encrypted, key.length + iv.length);
+                    const expectedMacFull = await this.sha256(macData);
+                    const expectedMac = expectedMacFull.slice(0, 16);
+
+                    let macMatch = true;
+                    for (let i = 0; i < 16; i++) {
+                        if (mac[i] !== expectedMac[i]) macMatch = false;
+                    }
+
+                    if (!macMatch) {
+                        throw new Error('Authentication failed');
+                    }
+
+                    const decrypted = new Uint8Array(encrypted.length);
+                    let counter = 0;
+
+                    for (let i = 0; i < encrypted.length; i++) {
+                        if (i % 32 === 0) {
+                            const counterBytes = new Uint8Array(8);
+                            new DataView(counterBytes.buffer).setBigUint64(0, BigInt(counter), false);
+
+                            const toHash = new Uint8Array(key.length + iv.length + 8);
+                            toHash.set(key);
+                            toHash.set(iv, key.length);
+                            toHash.set(counterBytes, key.length + iv.length);
+
+                            var keystream = await this.sha256(toHash);
+                            counter++;
+                        }
+
+                        decrypted[i] = encrypted[i] ^ keystream[i % 32];
+                    }
+
+                    return new TextDecoder().decode(decrypted);
+                } catch (error) {
+                    throw new Error(`Decryption failed: ${error.message}`);
+                }
+            }
+        }
+
+        function addMessage(type, content, user = null) {
+            const container = document.getElementById('chatContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+
+            let label = '';
+            if (type === 'you') {
+                label = `[${username}]`;
+            } else if (type === 'other' && user) {
+                label = `[${user}]`;
+            } else if (type === 'error') {
+                label = '[ERROR]';
+            } else if (type === 'system') {
+                label = '[SYSTEM]';
+            }
+
+            messageDiv.innerHTML = `
+                <div class="message-label">${label}</div>
+                <div class="message-content">${content}</div>
+            `;
+
+            container.appendChild(messageDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function updateUsersList(users) {
+            const container = document.getElementById('usersList');
+            container.innerHTML = '';
+            
+            users.forEach(user => {
+                const chip = document.createElement('span');
+                chip.className = 'user-chip';
+                chip.textContent = user;
+                container.appendChild(chip);
+            });
+        }
+
+        async function fetchActiveUsers() {
+            if (!isConnected) return;
+            
+            try {
+                const response = await fetch(`${baseUrl}/users`, {
+                    method: 'GET',
+                    mode: 'cors'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    updateUsersList(data.users);
+                }
+            } catch (error) {
+                console.error('Error fetching users:', error);
+            }
+        }
+
+        async function registerUsername() {
+            try {
+                const response = await fetch(`${baseUrl}/register`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: username
+                    })
+                });
+
+                if (response.ok) {
+                    console.log('Username registered successfully');
+                } else {
+                    console.error('Failed to register username');
+                }
+            } catch (error) {
+                console.error('Registration error:', error);
+            }
+        }
+
+        function handleNameKeyPress(event) {
+            if (event.key === 'Enter') {
+                setUsername();
+            }
+        }
+
+        function handleKeyKeyPress(event) {
+            if (event.key === 'Enter') {
+                setEncryptionKey();
+            }
+        }
+
+        function setUsername() {
+            const input = document.getElementById('nameInput');
+            const name = input.value.trim();
+
+            if (!name) {
+                alert('Please enter a name');
+                return;
+            }
+
+            username = name;
+            document.getElementById('nameModal').classList.remove('active');
+            document.getElementById('usernameDisplay').textContent = `(${username})`;
+
+            addMessage('system', `Welcome, ${username}! Please connect to the server.`);
+        }
+
+        function promptForKey() {
+            document.getElementById('keyModal').classList.add('active');
+            document.getElementById('keyInput').focus();
+        }
+
+        async function setEncryptionKey() {
+            const input = document.getElementById('keyInput');
+            const key = input.value;
+
+            if (!key) {
+                alert('Please enter an encryption key');
+                return;
+            }
+
+            document.getElementById('keyModal').classList.remove('active');
+            await testConnection(key);
+        }
+
+        async function testConnection(password) {
+            const host = document.getElementById('hostInput').value;
+            const port = document.getElementById('portInput').value;
+            baseUrl = `http://${host}:${port}`;
+
+            try {
+                const saltResponse = await fetch(`${baseUrl}/salt`, {
+                    method: 'GET',
+                    mode: 'cors'
+                });
+
+                if (!saltResponse.ok) {
+                    throw new Error('Could not get encryption salt');
+                }
+
+                const saltData = await saltResponse.json();
+                salt = new Uint8Array(
+                    atob(saltData.salt).split('').map(c => c.charCodeAt(0))
+                );
+
+                encryptionKey = await SecureChat.deriveKey(password, salt);
+
+                const response = await fetch(`${baseUrl}/health`, {
+                    method: 'GET',
+                    mode: 'cors'
+                });
+
+                if (response.ok) {
+                    isConnected = true;
+                    document.getElementById('statusDot').classList.add('connected');
+                    document.getElementById('statusText').textContent = `Connected to ${host}:${port}`;
+                    document.getElementById('messageInput').disabled = false;
+                    document.getElementById('sendButton').disabled = false;
+                    addMessage('system', `🔒 Securely connected to ${host}:${port}`);
+
+                    // Register username with server
+                    await registerUsername();
+
+                    startPolling();
+                    startUsersPolling();
+                } else {
+                    throw new Error(`Server returned status ${response.status}`);
+                }
+            } catch (error) {
+                isConnected = false;
+                encryptionKey = null;
+                document.getElementById('statusDot').classList.remove('connected');
+                document.getElementById('statusText').textContent = 'Connection failed';
+                addMessage('error', `Could not connect: ${error.message}`);
+                document.getElementById('keyModal').classList.add('active');
+            }
+        }
+
+        function startPolling() {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+
+            pollingInterval = setInterval(async () => {
+                if (!isConnected) return;
+
+                try {
+                    const response = await fetch(`${baseUrl}/messages?since=${lastMessageId}`, {
+                        method: 'GET',
+                        mode: 'cors'
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+
+                        for (const msg of data.messages) {
+                            if (msg.username !== username) {
+                                try {
+                                    const decrypted = await SecureChat.decrypt(msg.encrypted, encryptionKey);
+                                    addMessage('other', decrypted, msg.username);
+                                } catch (e) {
+                                    addMessage('error', `Failed to decrypt message from ${msg.username}`);
+                                }
+                            }
+                            lastMessageId = Math.max(lastMessageId, msg.id);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Polling error:', error);
+                }
+            }, 1000);
+        }
+
+        function startUsersPolling() {
+            if (usersInterval) {
+                clearInterval(usersInterval);
+            }
+
+            // Fetch immediately
+            fetchActiveUsers();
+
+            // Then poll every 5 seconds
+            usersInterval = setInterval(fetchActiveUsers, 5000);
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            if (!isConnected) {
+                addMessage('error', 'Not connected to server. Please connect first.');
+                return;
+            }
+
+            addMessage('you', message);
+
+            try {
+                const encrypted = await SecureChat.encrypt(message, encryptionKey);
+                input.value = '';
+
+                const response = await fetch(`${baseUrl}/message`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        encrypted: encrypted,
+                        username: username
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.id) {
+                        lastMessageId = Math.max(lastMessageId, data.id);
+                    }
+                } else {
+                    addMessage('error', `Server returned status ${response.status}`);
+                }
+            } catch (error) {
+                addMessage('error', `Request failed: ${error.message}`);
+            }
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        document.getElementById('nameInput').focus();
+    </script>
+</body>
+</html>
