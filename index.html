@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Secure Encrypted Chat Client</title>
+    <title>E2E Encrypted Chat</title>
     <style>
         * {
             margin: 0;
@@ -105,6 +105,21 @@
             padding: 4px 10px;
             border-radius: 12px;
             font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .key-indicator {
+            font-size: 10px;
+        }
+
+        .key-indicator.verified {
+            color: #00ff00;
+        }
+
+        .key-indicator.unverified {
+            color: #ffaa00;
         }
 
         .chat-container {
@@ -270,25 +285,17 @@
         </div>
     </div>
 
-    <div class="modal" id="keyModal">
-        <div class="modal-content">
-            <h2>🔐 Enter Encryption Key</h2>
-            <input type="password" id="keyInput" placeholder="Shared secret key..." onkeypress="handleKeyKeyPress(event)">
-            <button onclick="setEncryptionKey()">Connect</button>
-        </div>
-    </div>
-
     <div class="header">
         <div class="connection-status">
             <div class="status-dot" id="statusDot"></div>
             <span id="statusText">Disconnected</span>
             <span class="username-display" id="usernameDisplay"></span>
-            <span class="security-badge" id="securityBadge">🔒 E2E Encrypted</span>
+            <span class="security-badge" id="securityBadge">🔒 E2E Encrypted (ECDH+AES-GCM)</span>
         </div>
         <div class="server-input">
             <input type="text" id="hostInput" placeholder="Host (e.g., 127.0.0.1)" value="127.0.0.1">
             <input type="number" id="portInput" placeholder="Port" value="8000">
-            <button onclick="promptForKey()">Connect</button>
+            <button onclick="connect()">Connect</button>
         </div>
     </div>
 
@@ -311,130 +318,100 @@
         let lastMessageId = 0;
         let pollingInterval = null;
         let usersInterval = null;
-        let encryptionKey = null;
-        let salt = null;
+        
+        // Crypto keys
+        let myKeyPair = null;
+        let myPublicKeyJWK = null;
+        let userPublicKeys = {}; // username -> JWK
+        let sharedSecrets = {}; // username -> CryptoKey
 
-        // ===== SECURE ENCRYPTION SYSTEM =====
-        class SecureChat {
-            static async deriveKey(password, salt, iterations = 100000) {
-                const enc = new TextEncoder();
-                const keyMaterial = await window.crypto.subtle.importKey(
-                    'raw',
-                    enc.encode(password),
-                    'PBKDF2',
-                    false,
-                    ['deriveBits', 'deriveKey']
-                );
-
-                const key = await window.crypto.subtle.deriveBits(
+        // ===== E2E ENCRYPTION SYSTEM (ECDH + AES-GCM) =====
+        class E2ECrypto {
+            static async generateKeyPair() {
+                return await window.crypto.subtle.generateKey(
                     {
-                        name: 'PBKDF2',
-                        salt: salt,
-                        iterations: iterations,
-                        hash: 'SHA-256'
+                        name: "ECDH",
+                        namedCurve: "P-256"
                     },
-                    keyMaterial,
-                    512
+                    true,
+                    ["deriveKey", "deriveBits"]
+                );
+            }
+
+            static async exportPublicKey(keyPair) {
+                return await window.crypto.subtle.exportKey("jwk", keyPair.publicKey);
+            }
+
+            static async importPublicKey(jwk) {
+                return await window.crypto.subtle.importKey(
+                    "jwk",
+                    jwk,
+                    {
+                        name: "ECDH",
+                        namedCurve: "P-256"
+                    },
+                    true,
+                    []
+                );
+            }
+
+            static async deriveSharedSecret(myPrivateKey, theirPublicKey) {
+                return await window.crypto.subtle.deriveKey(
+                    {
+                        name: "ECDH",
+                        public: theirPublicKey
+                    },
+                    myPrivateKey,
+                    {
+                        name: "AES-GCM",
+                        length: 256
+                    },
+                    false,
+                    ["encrypt", "decrypt"]
+                );
+            }
+
+            static async encrypt(plaintext, sharedKey) {
+                const encoder = new TextEncoder();
+                const data = encoder.encode(plaintext);
+                const iv = window.crypto.getRandomValues(new Uint8Array(12));
+
+                const encrypted = await window.crypto.subtle.encrypt(
+                    {
+                        name: "AES-GCM",
+                        iv: iv
+                    },
+                    sharedKey,
+                    data
                 );
 
-                return new Uint8Array(key);
-            }
-
-            static async sha256(data) {
-                const buffer = await window.crypto.subtle.digest('SHA-256', data);
-                return new Uint8Array(buffer);
-            }
-
-            static async encrypt(plaintext, key) {
-                const enc = new TextEncoder();
-                const data = enc.encode(plaintext);
-
-                const iv = window.crypto.getRandomValues(new Uint8Array(16));
-                const encrypted = new Uint8Array(data.length);
-                let counter = 0;
-
-                for (let i = 0; i < data.length; i++) {
-                    if (i % 32 === 0) {
-                        const counterBytes = new Uint8Array(8);
-                        new DataView(counterBytes.buffer).setBigUint64(0, BigInt(counter), false);
-
-                        const toHash = new Uint8Array(key.length + iv.length + 8);
-                        toHash.set(key);
-                        toHash.set(iv, key.length);
-                        toHash.set(counterBytes, key.length + iv.length);
-
-                        var keystream = await this.sha256(toHash);
-                        counter++;
-                    }
-
-                    encrypted[i] = data[i] ^ keystream[i % 32];
-                }
-
-                const macData = new Uint8Array(key.length + iv.length + encrypted.length);
-                macData.set(key);
-                macData.set(iv, key.length);
-                macData.set(encrypted, key.length + iv.length);
-                const macFull = await this.sha256(macData);
-                const mac = macFull.slice(0, 16);
-
-                const result = new Uint8Array(iv.length + encrypted.length + mac.length);
+                // Combine IV + ciphertext
+                const result = new Uint8Array(iv.length + encrypted.byteLength);
                 result.set(iv);
-                result.set(encrypted, iv.length);
-                result.set(mac, iv.length + encrypted.length);
+                result.set(new Uint8Array(encrypted), iv.length);
 
                 return btoa(String.fromCharCode(...result));
             }
 
-            static async decrypt(ciphertext, key) {
-                try {
-                    const data = new Uint8Array(
-                        atob(ciphertext).split('').map(c => c.charCodeAt(0))
-                    );
+            static async decrypt(ciphertext, sharedKey) {
+                const data = new Uint8Array(
+                    atob(ciphertext).split('').map(c => c.charCodeAt(0))
+                );
 
-                    const iv = data.slice(0, 16);
-                    const mac = data.slice(-16);
-                    const encrypted = data.slice(16, -16);
+                const iv = data.slice(0, 12);
+                const encrypted = data.slice(12);
 
-                    const macData = new Uint8Array(key.length + iv.length + encrypted.length);
-                    macData.set(key);
-                    macData.set(iv, key.length);
-                    macData.set(encrypted, key.length + iv.length);
-                    const expectedMacFull = await this.sha256(macData);
-                    const expectedMac = expectedMacFull.slice(0, 16);
+                const decrypted = await window.crypto.subtle.decrypt(
+                    {
+                        name: "AES-GCM",
+                        iv: iv
+                    },
+                    sharedKey,
+                    encrypted
+                );
 
-                    let macMatch = true;
-                    for (let i = 0; i < 16; i++) {
-                        if (mac[i] !== expectedMac[i]) macMatch = false;
-                    }
-
-                    if (!macMatch) {
-                        throw new Error('Authentication failed');
-                    }
-
-                    const decrypted = new Uint8Array(encrypted.length);
-                    let counter = 0;
-
-                    for (let i = 0; i < encrypted.length; i++) {
-                        if (i % 32 === 0) {
-                            const counterBytes = new Uint8Array(8);
-                            new DataView(counterBytes.buffer).setBigUint64(0, BigInt(counter), false);
-
-                            const toHash = new Uint8Array(key.length + iv.length + 8);
-                            toHash.set(key);
-                            toHash.set(iv, key.length);
-                            toHash.set(counterBytes, key.length + iv.length);
-
-                            var keystream = await this.sha256(toHash);
-                            counter++;
-                        }
-
-                        decrypted[i] = encrypted[i] ^ keystream[i % 32];
-                    }
-
-                    return new TextDecoder().decode(decrypted);
-                } catch (error) {
-                    throw new Error(`Decryption failed: ${error.message}`);
-                }
+                const decoder = new TextDecoder();
+                return decoder.decode(decrypted);
             }
         }
 
@@ -466,30 +443,70 @@
         function updateUsersList(users) {
             const container = document.getElementById('usersList');
             container.innerHTML = '';
-            
+
             users.forEach(user => {
                 const chip = document.createElement('span');
                 chip.className = 'user-chip';
-                chip.textContent = user;
+                
+                const hasKey = userPublicKeys.hasOwnProperty(user);
+                const indicator = hasKey ? '🔒' : '🔓';
+                const indicatorClass = hasKey ? 'verified' : 'unverified';
+                
+                chip.innerHTML = `
+                    <span class="key-indicator ${indicatorClass}">${indicator}</span>
+                    ${user}
+                `;
                 container.appendChild(chip);
             });
         }
 
         async function fetchActiveUsers() {
             if (!isConnected) return;
-            
+
             try {
                 const response = await fetch(`${baseUrl}/users`, {
                     method: 'GET',
                     mode: 'cors'
                 });
-                
+
                 if (response.ok) {
                     const data = await response.json();
                     updateUsersList(data.users);
                 }
             } catch (error) {
                 console.error('Error fetching users:', error);
+            }
+        }
+
+        async function fetchPublicKeys() {
+            if (!isConnected) return;
+
+            try {
+                const response = await fetch(`${baseUrl}/public_keys`, {
+                    method: 'GET',
+                    mode: 'cors'
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    for (const [user, jwk] of Object.entries(data.keys)) {
+                        if (user !== username && !userPublicKeys[user]) {
+                            userPublicKeys[user] = jwk;
+                            
+                            // Derive shared secret
+                            const theirPublicKey = await E2ECrypto.importPublicKey(jwk);
+                            sharedSecrets[user] = await E2ECrypto.deriveSharedSecret(
+                                myKeyPair.privateKey,
+                                theirPublicKey
+                            );
+                            
+                            addMessage('system', `🔑 Established secure channel with ${user}`);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching public keys:', error);
             }
         }
 
@@ -501,14 +518,15 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        username: username
+                        username: username,
+                        public_key: myPublicKeyJWK
                     })
                 });
 
                 if (response.ok) {
-                    console.log('Username registered successfully');
+                    console.log('Username and public key registered');
                 } else {
-                    console.error('Failed to register username');
+                    console.error('Failed to register');
                 }
             } catch (error) {
                 console.error('Registration error:', error);
@@ -521,13 +539,7 @@
             }
         }
 
-        function handleKeyKeyPress(event) {
-            if (event.key === 'Enter') {
-                setEncryptionKey();
-            }
-        }
-
-        function setUsername() {
+        async function setUsername() {
             const input = document.getElementById('nameInput');
             const name = input.value.trim();
 
@@ -537,52 +549,24 @@
             }
 
             username = name;
+            
+            // Generate keypair
+            addMessage('system', 'Generating cryptographic keys...');
+            myKeyPair = await E2ECrypto.generateKeyPair();
+            myPublicKeyJWK = await E2ECrypto.exportPublicKey(myKeyPair);
+            
             document.getElementById('nameModal').classList.remove('active');
             document.getElementById('usernameDisplay').textContent = `(${username})`;
 
-            addMessage('system', `Welcome, ${username}! Please connect to the server.`);
+            addMessage('system', `Welcome, ${username}! Keys generated. Please connect to server.`);
         }
 
-        function promptForKey() {
-            document.getElementById('keyModal').classList.add('active');
-            document.getElementById('keyInput').focus();
-        }
-
-        async function setEncryptionKey() {
-            const input = document.getElementById('keyInput');
-            const key = input.value;
-
-            if (!key) {
-                alert('Please enter an encryption key');
-                return;
-            }
-
-            document.getElementById('keyModal').classList.remove('active');
-            await testConnection(key);
-        }
-
-        async function testConnection(password) {
+        async function connect() {
             const host = document.getElementById('hostInput').value;
             const port = document.getElementById('portInput').value;
             baseUrl = `http://${host}:${port}`;
 
             try {
-                const saltResponse = await fetch(`${baseUrl}/salt`, {
-                    method: 'GET',
-                    mode: 'cors'
-                });
-
-                if (!saltResponse.ok) {
-                    throw new Error('Could not get encryption salt');
-                }
-
-                const saltData = await saltResponse.json();
-                salt = new Uint8Array(
-                    atob(saltData.salt).split('').map(c => c.charCodeAt(0))
-                );
-
-                encryptionKey = await SecureChat.deriveKey(password, salt);
-
                 const response = await fetch(`${baseUrl}/health`, {
                     method: 'GET',
                     mode: 'cors'
@@ -594,23 +578,22 @@
                     document.getElementById('statusText').textContent = `Connected to ${host}:${port}`;
                     document.getElementById('messageInput').disabled = false;
                     document.getElementById('sendButton').disabled = false;
-                    addMessage('system', `🔒 Securely connected to ${host}:${port}`);
+                    addMessage('system', `✅ Connected to ${host}:${port}`);
 
-                    // Register username with server
                     await registerUsername();
+                    await fetchPublicKeys();
 
                     startPolling();
                     startUsersPolling();
+                    startKeyPolling();
                 } else {
                     throw new Error(`Server returned status ${response.status}`);
                 }
             } catch (error) {
                 isConnected = false;
-                encryptionKey = null;
                 document.getElementById('statusDot').classList.remove('connected');
                 document.getElementById('statusText').textContent = 'Connection failed';
                 addMessage('error', `Could not connect: ${error.message}`);
-                document.getElementById('keyModal').classList.add('active');
             }
         }
 
@@ -634,10 +617,18 @@
                         for (const msg of data.messages) {
                             if (msg.username !== username) {
                                 try {
-                                    const decrypted = await SecureChat.decrypt(msg.encrypted, encryptionKey);
+                                    if (!sharedSecrets[msg.username]) {
+                                        addMessage('error', `No shared key for ${msg.username} yet`);
+                                        continue;
+                                    }
+                                    
+                                    const decrypted = await E2ECrypto.decrypt(
+                                        msg.encrypted,
+                                        sharedSecrets[msg.username]
+                                    );
                                     addMessage('other', decrypted, msg.username);
                                 } catch (e) {
-                                    addMessage('error', `Failed to decrypt message from ${msg.username}`);
+                                    addMessage('error', `Failed to decrypt from ${msg.username}: ${e.message}`);
                                 }
                             }
                             lastMessageId = Math.max(lastMessageId, msg.id);
@@ -654,11 +645,12 @@
                 clearInterval(usersInterval);
             }
 
-            // Fetch immediately
             fetchActiveUsers();
-
-            // Then poll every 5 seconds
             usersInterval = setInterval(fetchActiveUsers, 5000);
+        }
+
+        function startKeyPolling() {
+            setInterval(fetchPublicKeys, 3000);
         }
 
         async function sendMessage() {
@@ -668,15 +660,20 @@
             if (!message) return;
 
             if (!isConnected) {
-                addMessage('error', 'Not connected to server. Please connect first.');
+                addMessage('error', 'Not connected to server');
                 return;
             }
 
             addMessage('you', message);
+            input.value = '';
 
             try {
-                const encrypted = await SecureChat.encrypt(message, encryptionKey);
-                input.value = '';
+                // Encrypt for each user
+                const encryptedMessages = {};
+                
+                for (const [user, sharedKey] of Object.entries(sharedSecrets)) {
+                    encryptedMessages[user] = await E2ECrypto.encrypt(message, sharedKey);
+                }
 
                 const response = await fetch(`${baseUrl}/message`, {
                     method: 'POST',
@@ -684,8 +681,8 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        encrypted: encrypted,
-                        username: username
+                        username: username,
+                        encrypted_for: encryptedMessages
                     })
                 });
 
@@ -694,11 +691,9 @@
                     if (data.id) {
                         lastMessageId = Math.max(lastMessageId, data.id);
                     }
-                } else {
-                    addMessage('error', `Server returned status ${response.status}`);
                 }
             } catch (error) {
-                addMessage('error', `Request failed: ${error.message}`);
+                addMessage('error', `Failed to send: ${error.message}`);
             }
         }
 
